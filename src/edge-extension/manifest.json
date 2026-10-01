@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "WorkLink Teams Bridge",
+  "version": "0.1.0",
+  "description": "Connect a configured Teams self-chat to a local WorkLink service.",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "background": {"service_worker": "background.js"},
+  "options_page": "options.html",
+  "action": {"default_title": "WorkLink settings"},
+  "content_scripts": [{
+    "matches": ["https://teams.cloud.microsoft/*"],
+    "js": ["dom.js", "content.js"],
+    "run_at": "document_idle"
+  }]
+}

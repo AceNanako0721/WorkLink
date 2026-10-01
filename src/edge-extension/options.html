@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>WorkLink 设置</title>
+<style>body{font:16px system-ui;max-width:620px;margin:50px auto;padding:20px}label{display:block;margin:20px 0}input{display:block;width:100%;padding:9px;box-sizing:border-box}button{padding:10px 20px}p{line-height:1.7}</style></head>
+<body><h1>WorkLink 设置</h1><p>扩展只连接本机服务，在配置匹配且保持可见的 Teams 自聊窗口收发。账号名称由服务的私有配置提供。已有草稿不会被覆盖。</p>
+<form id="settings"><label>本地服务地址<input id="serviceUrl" value="http://127.0.0.1:8765" required></label>
+<label>浏览器适配密钥<input id="adapterToken" type="password" autocomplete="off" required></label>
+<button>保存</button></form><p id="status" role="status"></p>
+<p>填写私有目录中 adapter-token.txt 的内容。它与 OMP 使用的 bot-token.txt 不同。不要把密钥放进截图、Issue 或公开日志。</p>
+<button id="check" type="button">检查连接</button>
+<p id="connection" role="status"></p>
+<details><summary>人工处理未确认的操作</summary><p>发送超时可能已成功。先核对 Teams 里是否已有对应回复；不要直接重发。确认没有发送或保存后，停止服务并按运行说明处理数据库。确认服务端已处理后再清除浏览器记录。</p>
+<button id="clear" type="button">服务端已处理，清除浏览器未确认记录</button></details>
+<script src="options.js"></script></body></html>

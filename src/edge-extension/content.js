@@ -1,0 +1,162 @@
+/* Serialize effects; preserve drafts and stop on identity changes or uncertain results. */
+(() => {
+  const dom = WorkLinkDOM;
+  let busy = false, settings = null, observed = false;
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const transport = message => chrome.runtime.sendMessage(message);
+  async function request(route, body = {}) {
+    const reply = await transport({ type: "request", route, body });
+    if (!reply?.ok) throw new Error("Bridge request failed");
+    return reply.result;
+  }
+  function identity() {
+    if (!settings || dom.title(document) !== settings.selfChatDisplayName) throw new Error("Wrong self chat");
+    return { chatTitle: settings.selfChatDisplayName };
+  }
+  function observedMessages() {
+    // Only command/reply text is transferred; ordinary personal messages stay on the page.
+    return dom.messages(document).map(item => ({ ...item,
+      text: /^(\/chat(?:\s|$)|\/choose(?:\s|$)|omp：)/.test(item.text) ? item.text : "",
+      date: Number.isFinite(item.date) ? item.date : Math.floor(Date.now() / 1000) }));
+  }
+  async function waitFor(check, milliseconds = 12000) {
+    const end = Date.now() + milliseconds;
+    while (Date.now() < end) {
+      identity();
+      const found = check();
+      if (found) return found;
+      await sleep(250);
+    }
+    throw new Error("Page outcome could not be confirmed");
+  }
+  function buttonByText(pattern) {
+    const menus = [...document.querySelectorAll('[role="menu"]')];
+    if (menus.length !== 1) throw new Error("Ambiguous message menu");
+    const buttons = [...menus[0].querySelectorAll('[role="menuitem"]')].filter(e => pattern.test(dom.normalize(e.innerText || e.getAttribute("aria-label") || "")));
+    if (buttons.length !== 1) throw new Error("Ambiguous menu control");
+    return buttons[0];
+  }
+  function fill(editor, text) {
+    editor.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    if (!document.execCommand("insertText", false, text)) throw new Error("Editor rejected input");
+    if (dom.normalize(editor.innerText) !== dom.normalize(text)) throw new Error("Editor text mismatch");
+  }
+  async function reconcile(saved) {
+    const rows = dom.messages(document);
+    if (saved.job.kind === "send") {
+      const matches = rows.filter(row => !saved.beforeIds.includes(row.id) && row.text === dom.normalize(saved.job.text) && row.sent);
+      return matches.length === 1 ? matches[0].id : null;
+    }
+    const row = rows.find(item => item.id === saved.job.teams_id);
+    if (saved.job.kind === "edit" && row?.text === dom.normalize(saved.job.text)) return row.id;
+    if (saved.job.kind === "delete" && row?.deleted) return row.id;
+    return null;
+  }
+  async function complete(saved, state, teamsId) {
+    await request("complete", { ...identity(), id: saved.job.id, lease: saved.job.lease, state, teamsId });
+    if (state !== "unknown") await transport({ type: "pending-set", operation: null });
+  }
+  async function execute(job) {
+    const saved = { job, beforeIds: dom.messages(document).map(row => row.id) };
+    let effectStarted = false;
+    // Persist the lease and baseline before touching the Teams editor.
+    await transport({ type: "pending-set", operation: saved });
+    try {
+      identity();
+      const composers = [...document.querySelectorAll(dom.selectors.composer)];
+      const compose = composers[0];
+      if (composers.length !== 1 || !compose || dom.normalize(compose.innerText)) throw new Error("Existing draft or edit preserved");
+      if (job.kind === "send") {
+        const send = document.querySelector(dom.selectors.send);
+        if (!send) throw new Error("Send control unavailable");
+        fill(compose, job.text);
+        await waitFor(() => !send.disabled, 3000);
+        identity();
+        effectStarted = true;
+        send.click();
+      } else {
+        const row = [...document.querySelectorAll(dom.selectors.messages)].find(e => e.getAttribute("data-mid") === job.teams_id);
+        if (!row || dom.normalize(row.querySelector(dom.selectors.text)?.innerText || "") !== dom.normalize(job.expected_text)) {
+          throw new Error("Reply not visible or was modified externally");
+        }
+        const menu = row.querySelector(dom.selectors.menu);
+        if (!menu) throw new Error("Message menu unavailable");
+        menu.click();
+        // Some Teams builds expose the menu through the keyboard context action.
+        if (!document.querySelector('[role="menu"]')) {
+          row.focus();
+          row.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", code: "F10", shiftKey: true, bubbles: true }));
+        }
+        if (job.kind === "edit") {
+          const edit = await waitFor(() => {
+            try { return buttonByText(/^(编辑|編輯|Edit|編集)$/i); } catch { return null; }
+          }, 3000);
+          edit.click();
+          // Teams renders its inline edit composer outside the message body.
+          const editor = await waitFor(() => {
+            const editors = [...document.querySelectorAll(dom.selectors.composer)].filter(e => dom.normalize(e.innerText) === dom.normalize(job.expected_text));
+            return editors.length === 1 ? editors[0] : null;
+          }, 3000);
+          fill(editor, job.text);
+          const save = await waitFor(() => {
+            const candidates = [...document.querySelectorAll('[data-tid="newMessageCommands-send"]')];
+            return candidates.length === 1 ? candidates[0] : null;
+          }, 3000);
+          identity();
+          effectStarted = true;
+          save.click();
+        } else if (job.kind === "delete") {
+          const remove = await waitFor(() => {
+            try { return buttonByText(/^(删除(?:此消息)?|刪除|Delete(?: this message)?|削除)$/i); } catch { return null; }
+          }, 3000);
+          identity();
+          effectStarted = true;
+          remove.click();
+        } else throw new Error("Unsupported effect");
+      }
+      const teamsId = await waitFor(() => {
+        // This function only reads DOM; promise reconciliation is handled below.
+        const rows = dom.messages(document);
+        if (job.kind === "send") {
+          const matches = rows.filter(r => !saved.beforeIds.includes(r.id) && r.text === dom.normalize(job.text) && r.sent);
+          return matches.length === 1 ? matches[0].id : null;
+        }
+        const row = rows.find(r => r.id === job.teams_id);
+        return job.kind === "edit" && row?.text === dom.normalize(job.text) || job.kind === "delete" && row?.deleted ? job.teams_id : null;
+      });
+      await complete(saved, "succeeded", teamsId);
+    } catch {
+      await complete(saved, effectStarted ? "unknown" : "failed");
+    }
+  }
+  async function tick() {
+    if (busy || document.visibilityState !== "visible") return;
+    busy = true;
+    try {
+      settings ||= await request("settings");
+      identity();
+      const saved = (await transport({ type: "pending-get" })).result;
+      if (saved) {
+        const found = await reconcile(saved);
+        if (found) await complete(saved, "succeeded", found);
+        // Never re-execute a lease whose browser outcome is unknown.
+        else return;
+      }
+      await request("observe", { ...identity(), baseline: !observed, messages: observedMessages() });
+      observed = true;
+      const job = await request("next", identity());
+      if (job) await execute(job);
+    } catch {
+      // No message bodies, account identifiers or keys are logged.
+    } finally {
+      busy = false;
+    }
+  }
+  setInterval(tick, 1000);
+  tick();
+})();

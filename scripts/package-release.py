@@ -17,8 +17,8 @@ if subprocess.check_output(['git', 'status', '--porcelain'], cwd=root):
 dist = root / 'dist'
 dist.mkdir(exist_ok=True)
 archive = dist / f'WorkLink-{version}.zip'
-allowed_files = {'README.md', 'VERSION', 'LICENSE', 'config.example.json'}
-allowed_dirs = {'src', 'doc', 'skills', 'scripts'}
+allowed_files = {'README.md', 'VERSION', 'LICENSE', 'config.example.json', 'AGENTS.md', '.gitignore'}
+allowed_dirs = {'src', 'doc', 'skills', 'scripts', 'tests'}
 names = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
 with zipfile.ZipFile(archive, 'x', compression=zipfile.ZIP_DEFLATED) as output:
     for name in names:

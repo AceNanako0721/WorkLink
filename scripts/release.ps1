@@ -14,6 +14,7 @@ if ($LASTEXITCODE -eq 0) { throw 'Version tag already exists.' }
 Invoke-Checked 'git' @('merge-base','--is-ancestor','origin/main','HEAD')
 Invoke-Checked 'python' @('scripts/check-public.py','--history')
 Invoke-Checked 'python' @('-m','unittest','discover','-s','tests','-v')
+Invoke-Checked 'node' @('--test','tests/edge-extension.test.cjs')
 if ((Get-Content VERSION -Raw).Trim() -ne $Version) {
     [System.IO.File]::WriteAllText((Join-Path (Get-Location) 'VERSION'), "$Version`n", [System.Text.UTF8Encoding]::new($false))
     Invoke-Checked 'git' @('add','--','VERSION')
