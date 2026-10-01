@@ -375,7 +375,7 @@ class Bridge:
             self.db.execute("UPDATE jobs SET state='leased',lease=? WHERE id=?", (nonce, row['id']))
             return {'id': row['id'], 'lease': nonce, 'kind': row['kind'], **json.loads(row['payload'])}
 
-    def complete(self, client_id, job_id, nonce, state, teams_id=None):
+    def complete(self, client_id, job_id, nonce, state, teams_id=None, failure_code=None):
         if state not in {'succeeded', 'failed', 'unknown'}:
             raise ApiError(400, 'Invalid operation outcome')
         with self.transaction():
@@ -388,7 +388,9 @@ class Bridge:
             if row['state'] not in {'leased', 'unknown'}:
                 raise ApiError(409, 'Operation is not awaiting confirmation')
             payload = json.loads(row['payload'])
-            result = None
+            codes = {'draft_present', 'send_unavailable', 'editor_input_rejected', 'editor_text_mismatch',
+                     'outcome_unconfirmed', 'reply_changed', 'menu_unavailable', 'identity_changed', 'adapter_error'}
+            result = {'failure_code': failure_code} if failure_code in codes and state != 'succeeded' else None
             if state == 'succeeded':
                 if row['kind'] != 'delete' and (not isinstance(teams_id, str) or not re.fullmatch(r'[0-9]{10,20}', teams_id)):
                     raise ApiError(400, 'Confirmed Teams message ID required')

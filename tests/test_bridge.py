@@ -128,6 +128,14 @@ class BridgeTests(unittest.TestCase):
             self.bridge.call('sendDocument', {})
         self.assertEqual(caught.exception.code, 501)
 
+    def test_failure_diagnostics_never_echo_arbitrary_browser_error(self):
+        for code, expected in [('editor_input_rejected', {'failure_code': 'editor_input_rejected'}), ('synthetic private error text', None)]:
+            jid = self.bridge.enqueue_effect('sendmessage', {'chat_id': 1001, 'text': 'fixture'})
+            job = self.bridge.lease('synthetic_adapter')
+            self.bridge.complete('synthetic_adapter', jid, job['lease'], 'failed', failure_code=code)
+            row = self.bridge.db.execute('SELECT result FROM jobs WHERE id=?', (jid,)).fetchone()
+            self.assertEqual(json.loads(row[0]), expected)
+
 
 class HttpTests(unittest.TestCase):
     def setUp(self):

@@ -57,8 +57,8 @@
     if (saved.job.kind === "delete" && row?.deleted) return row.id;
     return null;
   }
-  async function complete(saved, state, teamsId) {
-    await request("complete", { ...identity(), id: saved.job.id, lease: saved.job.lease, state, teamsId });
+  async function complete(saved, state, teamsId, failureCode) {
+    await request("complete", { ...identity(), id: saved.job.id, lease: saved.job.lease, state, teamsId, failureCode });
     if (state !== "unknown") await transport({ type: "pending-set", operation: null });
   }
   async function execute(job) {
@@ -130,8 +130,18 @@
         return job.kind === "edit" && row?.text === dom.normalize(job.text) || job.kind === "delete" && row?.deleted ? job.teams_id : null;
       });
       await complete(saved, "succeeded", teamsId);
-    } catch {
-      await complete(saved, effectStarted ? "unknown" : "failed");
+    } catch (error) {
+      const codes = {
+        "Existing draft or edit preserved": "draft_present",
+        "Send control unavailable": "send_unavailable",
+        "Editor rejected input": "editor_input_rejected",
+        "Editor text mismatch": "editor_text_mismatch",
+        "Page outcome could not be confirmed": "outcome_unconfirmed",
+        "Reply not visible or was modified externally": "reply_changed",
+        "Message menu unavailable": "menu_unavailable",
+        "Wrong self chat": "identity_changed"
+      };
+      await complete(saved, effectStarted ? "unknown" : "failed", undefined, codes[error.message] || "adapter_error");
     }
   }
   async function tick() {

@@ -51,6 +51,16 @@ def create_server(config_path, *, port_override=None):
             pass
 
         def reply(self, code, payload):
+            # Drain a small rejected POST body before closing: unread bytes can
+            # reset the TCP connection on Windows and discard the JSON error.
+            if self.command == 'POST' and not getattr(self, '_body_consumed', False):
+                try:
+                    length = int(self.headers.get('Content-Length', '0'))
+                    if 0 < length <= 256000:
+                        self.connection.settimeout(.2)
+                        self.rfile.read(length)
+                except (ValueError, OSError):
+                    pass
             data = json.dumps(payload, ensure_ascii=False).encode()
             self.send_response(code)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
@@ -72,6 +82,7 @@ def create_server(config_path, *, port_override=None):
                 raise ApiError(413, 'Request body exceeds limit')
             self.connection.settimeout(10)
             raw = self.rfile.read(length)
+            self._body_consumed = True
             kind = self.headers.get('Content-Type', '').split(';')[0].strip().lower()
             if kind == 'application/json':
                 data = json.loads(raw or b'{}')
@@ -104,7 +115,9 @@ def create_server(config_path, *, port_override=None):
                     elif path == '/adapter/status':
                         with bridge.cv:
                             result = {'adapterOnline': bridge.adapter_owner is not None and time.monotonic() - bridge.adapter_last_seen <= 15,
-                                      'unfinished': [dict(row) for row in bridge.db.execute("SELECT id,kind,state FROM jobs WHERE state IN ('pending','leased','unknown')")]}
+                                      'unfinished': [dict(row) for row in bridge.db.execute("SELECT id,kind,state FROM jobs WHERE state IN ('pending','leased','unknown')")],
+                                      'recentFailures': [{'kind': row['kind'], 'state': row['state'], 'code': (json.loads(row['result']) or {}).get('failure_code')}
+                                                         for row in bridge.db.execute("SELECT kind,state,result FROM jobs WHERE state IN ('failed','unknown') ORDER BY created DESC LIMIT 5")]}
                     else:
                         if data.get('chatTitle') != expected_title:
                             raise ApiError(403, 'Self-chat identity mismatch')
@@ -116,7 +129,7 @@ def create_server(config_path, *, port_override=None):
                         elif path == '/adapter/next':
                             result = bridge.lease(client)
                         elif path == '/adapter/complete':
-                            result = bridge.complete(client, data.get('id'), data.get('lease'), data.get('state'), data.get('teamsId'))
+                            result = bridge.complete(client, data.get('id'), data.get('lease'), data.get('state'), data.get('teamsId'), data.get('failureCode'))
                         else:
                             raise ApiError(404, 'Not found')
                 else:
