@@ -1,0 +1,27 @@
+# Runtime and private information must live outside this checkout.
+artifacts/
+private/
+.private/
+.env
+.env.*
+!.env.example
+config.json
+config.local.*
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pem
+*.key
+*.pfx
+*.har
+browser-profile/
+logs/
+downloads/
+screenshots/
+dist/
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Teams 自聊收发"
+  short_description: "通过 Edge 读取本人 Teams 自聊消息，并按要求发送或回发原文"

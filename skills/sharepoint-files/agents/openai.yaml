@@ -1,0 +1,3 @@
+interface:
+  display_name: "SharePoint 个人文件夹传输"
+  short_description: "通过 Edge 在 SharePoint 的 FOLDER_ID 文件夹上传和下载文件"

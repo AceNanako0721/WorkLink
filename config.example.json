@@ -1,0 +1,15 @@
+{
+  "teams": {
+    "url": "https://teams.cloud.microsoft/",
+    "selfChatDisplayName": "SELF_CHAT_DISPLAY_NAME"
+  },
+  "sharepoint": {
+    "siteUrl": "https://example.sharepoint.com/sites/SITE_ID",
+    "folderPath": "/sites/SITE_ID/Shared Documents/FOLDER_ID"
+  },
+  "service": {
+    "host": "127.0.0.1",
+    "port": 8765
+  },
+  "privateDataDirectory": "SET_OUTSIDE_CHECKOUT"
+}
