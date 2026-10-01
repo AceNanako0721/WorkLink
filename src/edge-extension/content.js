@@ -32,20 +32,33 @@
   function buttonByText(pattern) {
     const menus = [...document.querySelectorAll('[role="menu"]')];
     if (menus.length !== 1) throw new Error("Ambiguous message menu");
-    const buttons = [...menus[0].querySelectorAll('[role="menuitem"]')].filter(e => pattern.test(dom.normalize(e.innerText || e.getAttribute("aria-label") || "")));
+    const buttons = [...menus[0].querySelectorAll('[role="menuitem"]')].filter(e => pattern.test(dom.normalize(e.getAttribute("aria-label") || e.innerText || "")));
     if (buttons.length !== 1) throw new Error("Ambiguous menu control");
     return buttons[0];
   }
-  function fill(editor, text) {
+  async function fill(editor, text) {
+    const original = dom.normalize(editor.innerText);
     editor.focus();
+    // Teams may update its CKEditor selection when focus enters the composer.
+    await sleep(50);
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(editor);
     selection.removeAllRanges();
     selection.addRange(range);
-    if (!document.execCommand("insertText", false, text)) throw new Error("Editor rejected input");
-    if (dom.normalize(editor.innerText) !== dom.normalize(text)) throw new Error("Editor text mismatch");
+    // Let CKEditor observe the selection before pasting into its model.
+    // Immediate paste can prepend text instead of replacing the old reply.
+    await sleep(50);
+    identity();
+    // Use CKEditor's model-aware clipboard pipeline for both sends and edits.
+    // DOM-only native insertion can appear correct but revert when saved.
+    if (dom.normalize(editor.innerText) !== original) throw new Error("Editor text mismatch");
+    const transfer = new DataTransfer();
+    transfer.setData("text/plain", text);
+    editor.dispatchEvent(new ClipboardEvent("paste", {bubbles: true, cancelable: true, clipboardData: transfer}));
+    await waitFor(() => dom.normalize(editor.innerText) === dom.normalize(text), 1500);
   }
+
   async function reconcile(saved) {
     const rows = dom.messages(document);
     if (saved.job.kind === "send") {
@@ -72,10 +85,14 @@
       const compose = composers[0];
       if (composers.length !== 1 || !compose || dom.normalize(compose.innerText)) throw new Error("Existing draft or edit preserved");
       if (job.kind === "send") {
-        const send = document.querySelector(dom.selectors.send);
-        if (!send) throw new Error("Send control unavailable");
-        fill(compose, job.text);
-        await waitFor(() => !send.disabled, 3000);
+        await fill(compose, job.text);
+        // Pasting can replace the compact composer and detach its old button.
+        // Resolve the current send control only after the editor has settled.
+        const send = await waitFor(() => {
+          const buttons = [...document.querySelectorAll(dom.selectors.send + ', [data-tid="newMessageCommands-send"]')]
+            .filter(button => /^(发送|傳送|Send|送信)(?:\s|$)/i.test(button.getAttribute("aria-label") || ""));
+          return buttons.length === 1 && !buttons[0].disabled && buttons[0].getAttribute("aria-disabled") !== "true" ? buttons[0] : null;
+        }, 3000);
         identity();
         effectStarted = true;
         send.click();
@@ -87,13 +104,28 @@
         const menu = row.querySelector(dom.selectors.menu);
         if (!menu) throw new Error("Message menu unavailable");
         menu.click();
+        let toolbar = null;
+        try {
+          await waitFor(() => {
+            toolbar = document.getElementById(job.teams_id + "-popover-surface");
+            return document.querySelector('[role="menu"]') || toolbar;
+          }, 750);
+        } catch { /* Try the keyboard context action below. */ }
+        // Current Teams opens a message-bound toolbar before the overflow menu.
+        const directEdit = toolbar?.querySelector('[data-tid="message-actions-edit"]');
+        if (toolbar && !(job.kind === "edit" && directEdit)) {
+          const more = toolbar.querySelector('[data-tid="message-actions-more"]');
+          if (!more) throw new Error("Message menu unavailable");
+          more.click();
+          await waitFor(() => document.querySelector('[role="menu"]'), 3000);
+        }
         // Some Teams builds expose the menu through the keyboard context action.
-        if (!document.querySelector('[role="menu"]')) {
+        if (!toolbar && !document.querySelector('[role="menu"]')) {
           row.focus();
           row.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", code: "F10", shiftKey: true, bubbles: true }));
         }
         if (job.kind === "edit") {
-          const edit = await waitFor(() => {
+          const edit = directEdit || await waitFor(() => {
             try { return buttonByText(/^(编辑|編輯|Edit|編集)$/i); } catch { return null; }
           }, 3000);
           edit.click();
@@ -102,7 +134,7 @@
             const editors = [...document.querySelectorAll(dom.selectors.composer)].filter(e => dom.normalize(e.innerText) === dom.normalize(job.expected_text));
             return editors.length === 1 ? editors[0] : null;
           }, 3000);
-          fill(editor, job.text);
+          await fill(editor, job.text);
           const save = await waitFor(() => {
             const candidates = [...document.querySelectorAll('[data-tid="newMessageCommands-send"]')];
             return candidates.length === 1 ? candidates[0] : null;

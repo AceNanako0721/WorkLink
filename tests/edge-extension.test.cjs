@@ -6,11 +6,17 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 const dom = require('../src/edge-extension/dom.js');
 
-function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind='send', changed=false} = {}) {
+function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind='send', changed=false, input='normal', replacedSend=false, toolbar=false} = {}) {
   const state = {rows: [], menu: null, editing: null, saved: null, calls: [], finished: false};
   const heading = {innerText: title, querySelectorAll: () => Array(participants).fill({})};
-  const compose = {innerText: draft, focus() {state.focus = this;}};
-  const job = {id: 'synthetic_job', lease: 'synthetic_lease', kind, teams_id: kind === 'send' ? null : '1900000000001', text: 'omp：Fixture reply', expected_text: 'omp：Old reply'};
+  function editor(text) { return {innerText: text, focus() {state.focus = this; if (input === "user-edit") setTimeout(() => {this.innerText = "New personal draft";}, 10);},
+    replaceChildren() {throw new Error('Controlled-editor DOM must not be replaced');},
+    dispatchEvent(event) {assert.equal(event.type, 'paste'); state.pasteEvents = (state.pasteEvents || 0) + 1;
+      const text = event.clipboardData.getData('text/plain');
+      if (input === 'delayed') setTimeout(() => {this.innerText = text;}, 40);
+      else this.innerText = this.innerText && !state.selectionSettled ? text + this.innerText : text;}}; }
+  const compose = editor(draft);
+  const job = {id: 'synthetic_job', lease: 'synthetic_lease', kind, teams_id: kind === 'send' ? null : '1900000000001', text: 'omp：Fixture reply\nOption: /choose k000000000001 1', expected_text: 'omp：Old reply'};
   function message(id, text, {sent=true, edited=false, deleted=false} = {}) {
     const row = {
       id, innerText: deleted ? '此消息已删除。\n撤消' : text, text: {innerText: text}, sent, edited, deleted,
@@ -22,17 +28,19 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
     return row;
   }
   function openMenu(row) {
-    const edit = {innerText: '编辑', click() {
+    const edit = {innerText: '编辑\nE', getAttribute: key => key === 'aria-label' ? '编辑' : null, click() {
       state.menu = null;
-      state.editing = {innerText: row.text.innerText, focus() {state.focus = this;}};
+      state.editing = editor(row.text.innerText);
     }};
-    const remove = {innerText: '删除', click() {
+    const remove = {innerText: '删除\nDelete', getAttribute: key => key === 'aria-label' ? '删除此消息' : null, click() {
       state.menu = null; row.deleted = true; row.innerText = '此消息已删除。\n撤消'; row.text.innerText = '';
     }};
-    state.menu = {querySelectorAll: () => [edit, remove]};
+    const items = {querySelectorAll: () => [edit, remove]};
+    if (toolbar) state.toolbar = {querySelector: selector => selector === '[data-tid="message-actions-edit"]' ? edit : selector === '[data-tid="message-actions-more"]' ? {click() {state.menu = items; state.moreClicks = (state.moreClicks || 0) + 1;}} : null};
+    else state.menu = items;
   }
   if (kind !== 'send') state.rows.push(message(job.teams_id, changed ? 'omp：Manually changed' : job.expected_text));
-  const send = {get disabled() {return !compose.innerText;}, click() {
+  const send = {getAttribute: key => key === 'aria-label' ? '发送 (Ctrl+Enter)' : null, get disabled() {return !compose.innerText;}, click() {
     state.rows.push(message('1900000000002', compose.innerText)); compose.innerText = '';
   }};
   const save = {click() {
@@ -45,11 +53,12 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
     querySelector(selector) {
       if (selector === dom.selectors.title) return heading;
       if (selector === dom.selectors.composer) return compose;
-      if (selector === dom.selectors.send) return send;
+      if (selector === dom.selectors.send) return replacedSend ? {disabled: false, click() {state.staleClicks = (state.staleClicks || 0) + 1;}} : send;
       if (selector === '[role="menu"]') return state.menu;
       return null;
     },
     querySelectorAll(selector) {
+      if (selector === dom.selectors.send + ', [data-tid="newMessageCommands-send"]') return [send];
       if (selector === dom.selectors.messages) return state.rows;
       if (selector === dom.selectors.composer) return state.editing ? [state.editing, compose] : [compose];
       if (selector === '[role="menu"]') return state.menu ? [state.menu] : [];
@@ -57,6 +66,7 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
       return [];
     },
     getElementById(id) {
+      if (id === job.teams_id + '-popover-surface') return state.toolbar || null;
       const row = state.rows.find(row => id.endsWith(row.id));
       if (!row) return null;
       if (id.startsWith('read-status-icon-') && row.sent) return {getAttribute: () => '已发送'};
@@ -64,7 +74,9 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
       return null;
     },
     createRange: () => ({selectNodeContents() {}}),
-    execCommand(command, _ui, text) {assert.equal(command, 'insertText'); state.focus.innerText = text; return true;}
+    createElement(tag) {return {children: [], append(node) {this.children.push(node);}, get innerText() {return tag === 'br' ? '\n' : this.children.map(node => node.innerText).join('');}};},
+    createTextNode(text) {return {innerText: text};},
+    execCommand() {throw new Error('DOM-only insertion must not be used');}
   };
   const chrome = {runtime: {async sendMessage(message) {
     if (message.type === 'pending-set') {state.saved = message.operation; return {ok: true};}
@@ -82,10 +94,15 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
 async function run(options) {
   const f = fixture(options);
   const context = {WorkLinkDOM: dom, document: f.document, chrome: f.chrome,
-    window: {getSelection: () => ({removeAllRanges() {}, addRange() {}})},
-    setInterval() {}, setTimeout, Date, KeyboardEvent: class {}};
+    window: {getSelection: () => ({removeAllRanges() {f.state.selectionSettled = false;}, addRange() {setTimeout(() => {f.state.selectionSettled = true;}, 20);}})},
+    setInterval() {}, setTimeout, Date, KeyboardEvent: class {},
+    DataTransfer: class {constructor() {this.data = new Map();} setData(key, value) {this.data.set(key, value);} getData(key) {return this.data.get(key);}},
+    ClipboardEvent: class {constructor(type, options) {this.type = type; this.clipboardData = options.clipboardData;}}};
   vm.runInNewContext(readFileSync(path.join(__dirname, '../src/edge-extension/content.js'), 'utf8'), context);
-  for (let i = 0; i < 100 && !f.state.finished; i++) await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 250 && !f.state.finished; i++) {
+    if (dom.title(f.document) !== 'Synthetic Owner (you)' && f.state.calls.length) break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
   return f;
 }
 
@@ -103,6 +120,13 @@ test('Inline edit outside the message body uses its own save control and retains
   assert.equal(f.state.rows[0].text.innerText, f.job.text);
   assert.equal(dom.messages(f.document)[0].edited, true);
 });
+
+test('Paste replaces the compact send button; only the current accessible send control is used', async () => {
+  const f = await run({input: 'cancel', replacedSend: true});
+  assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
+  assert.equal(f.state.staleClicks || 0, 0);
+  assert.equal(f.state.rows.length, 1);
+});
 test('Delete requires an explicit deleted tombstone with the original ID', async () => {
   const f = await run({kind: 'delete'});
   const complete = f.state.calls.find(call => call.route === 'complete');
@@ -110,11 +134,38 @@ test('Delete requires an explicit deleted tombstone with the original ID', async
   assert.equal(complete.body.teamsId, f.job.teams_id);
   assert.equal(dom.messages(f.document)[0].deleted, true);
 });
+
+test('Message-bound toolbar edits directly and opens overflow for deletion', async () => {
+  for (const kind of ['edit', 'delete']) {
+    const f = await run({kind, toolbar: true});
+    assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
+    assert.equal(f.state.moreClicks || 0, kind === 'delete' ? 1 : 0);
+    assert.equal(f.state.calls.find(call => call.route === 'complete').body.teamsId, f.job.teams_id);
+  }
+});
 test('Existing draft survives and no send occurs', async () => {
   const f = await run({draft: 'Personal unfinished draft'});
   assert.equal(f.compose.innerText, 'Personal unfinished draft');
   assert.equal(f.state.rows.length, 0);
   assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'failed');
+});
+test('Model paste pipeline handles multiline content without DOM-only insertion', async () => {
+  const f = await run({input: 'cancel'});
+  assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
+  assert.equal(f.state.pasteEvents, 1);
+  assert.equal(f.state.rows[0].text.innerText, f.job.text);
+});
+test('Delayed model paste settles without a second replacement', async () => {
+  const f = await run({input: 'delayed'});
+  assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
+  assert.equal(f.state.pasteEvents, 1);
+});
+test('Concurrent personal input is preserved and cannot trigger fallback or send', async () => {
+  const f = await run({input: 'user-edit'});
+  assert.equal(f.state.rows.length, 0);
+  assert.equal(f.compose.innerText, 'New personal draft');
+  assert.equal(f.state.pasteEvents || 0, 0);
+  assert.equal(f.state.calls.find(call => call.route === 'complete').body.failureCode, 'editor_text_mismatch');
 });
 test('Reply externally edited by the user cannot be changed by this operation', async () => {
   const f = await run({kind: 'edit', changed: true});
@@ -135,7 +186,7 @@ test('Ordinary personal text is removed from observations', async () => {
     window: {getSelection: () => ({removeAllRanges() {}, addRange() {}})},
     setInterval(fn) {interval = fn;}, setTimeout, Date};
   vm.runInNewContext(readFileSync(path.join(__dirname, '../src/edge-extension/content.js'), 'utf8'), context);
-  for (let i = 0; i < 100 && !f.state.finished; i++) await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 100 && !f.state.finished; i++) await new Promise(resolve => setTimeout(resolve, 10));
   const observation = f.state.calls.find(call => call.route === 'observe');
   assert.equal(observation.body.messages[0].text, '');
 });
