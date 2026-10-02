@@ -12,7 +12,7 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
   function editor(text) { return {innerText: text, focus() {state.focus = this; if (input === "user-edit") setTimeout(() => {this.innerText = "New personal draft";}, 10);},
     replaceChildren() {throw new Error('Controlled-editor DOM must not be replaced');},
     dispatchEvent(event) {assert.equal(event.type, 'paste'); state.pasteEvents = (state.pasteEvents || 0) + 1;
-      const text = input === 'paragraphs' ? event.clipboardData.getData('text/plain').replace(/\n\n/g, '\n\n\n\n') : event.clipboardData.getData('text/plain');
+      const text = input === 'paragraphs' ? event.clipboardData.getData('text/plain').replace(/\n\n/g, '\n\n \u00a0\n\n') : event.clipboardData.getData('text/plain');
       if (input === 'delayed') setTimeout(() => {this.innerText = text;}, 40);
       else this.innerText = this.innerText && !state.selectionSettled ? text + this.innerText : text;}}; }
   const compose = editor(draft);
@@ -149,7 +149,7 @@ test('Reply confirmation tolerates Teams expanding blank paragraphs', async () =
   for (const kind of ['send', 'edit']) {
     const f = await run({kind, input: 'paragraphs'});
     assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
-    assert.equal(f.state.rows[0].text.innerText, f.job.text.replace(/\n\n/g, '\n\n\n\n'));
+    assert.equal(f.state.rows[0].text.innerText, f.job.text.replace(/\n\n/g, '\n\n \u00a0\n\n'));
   }
 });
 test('Existing draft survives and no send occurs', async () => {
