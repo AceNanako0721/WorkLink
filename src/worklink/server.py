@@ -115,6 +115,8 @@ def create_server(config_path, *, port_override=None):
                     elif path == '/adapter/status':
                         with bridge.cv:
                             result = {'adapterOnline': bridge.adapter_owner is not None and time.monotonic() - bridge.adapter_last_seen <= 15,
+                                      'longPolling': bridge.adapter_poll_wait > 0,
+                                      'lastSeenSeconds': round(time.monotonic() - bridge.adapter_last_seen, 1) if bridge.adapter_owner else None,
                                       'unfinished': [dict(row) for row in bridge.db.execute("SELECT id,kind,state FROM jobs WHERE state IN ('pending','leased','unknown')")],
                                       'recentFailures': [{'kind': row['kind'], 'state': row['state'], 'code': (json.loads(row['result']) or {}).get('failure_code')}
                                                          for row in bridge.db.execute("SELECT kind,state,COALESCE(result, 'null') AS result FROM jobs WHERE state IN ('failed','unknown') ORDER BY created DESC LIMIT 5")]}
@@ -127,7 +129,7 @@ def create_server(config_path, *, port_override=None):
                                 bridge.adapter(client)
                             result = bridge.ingest(data.get('messages'), baseline=bool(data.get('baseline')))
                         elif path == '/adapter/next':
-                            result = bridge.lease(client)
+                            result = bridge.lease(client, data.get('wait', 0))
                         elif path == '/adapter/complete':
                             result = bridge.complete(client, data.get('id'), data.get('lease'), data.get('state'), data.get('teamsId'), data.get('failureCode'))
                         else:

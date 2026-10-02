@@ -182,6 +182,7 @@
   async function tick() {
     if (busy) return;
     busy = true;
+    let polled = false;
     try {
       settings ||= await request("settings");
       identity();
@@ -194,12 +195,16 @@
       }
       await request("observe", { ...identity(), baseline: !observed, messages: observedMessages() });
       observed = true;
-      const job = await request("next", identity());
+      // The service waits up to ten seconds and wakes when a reply is ready.
+      // Successful polls continue through microtasks, not background page timers.
+      const job = await request("next", { ...identity(), wait: 10 });
+      polled = true;
       if (job) await execute(job);
     } catch {
       // No message bodies, account identifiers or keys are logged.
     } finally {
       busy = false;
+      if (polled) queueMicrotask(tick);
     }
   }
   setInterval(tick, 1000);

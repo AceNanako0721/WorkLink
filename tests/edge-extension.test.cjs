@@ -85,7 +85,7 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
     state.calls.push(message);
     if (message.route === 'settings') return {ok: true, result: {selfChatDisplayName: 'Synthetic Owner (you)'}};
     if (message.route === 'observe') return {ok: true, result: {accepted: 0}};
-    if (message.route === 'next') return {ok: true, result: job};
+    if (message.route === 'next') return {ok: true, result: state.finished ? null : job};
     if (message.route === 'complete') {state.finished = true; return {ok: true, result: true};}
     throw new Error('Unexpected route');
   }}};
@@ -96,7 +96,7 @@ async function run(options) {
   const f = fixture(options);
   const context = {WorkLinkDOM: dom, document: f.document, chrome: f.chrome,
     window: {getSelection: () => ({removeAllRanges() {f.state.selectionSettled = false;}, addRange() {setTimeout(() => {f.state.selectionSettled = true;}, 20);}})},
-    setInterval() {}, setTimeout, Date, KeyboardEvent: class {},
+    setInterval() {}, queueMicrotask(fn) {f.state.continuePoll = fn;}, setTimeout, Date, KeyboardEvent: class {},
     DataTransfer: class {constructor() {this.data = new Map();} setData(key, value) {this.data.set(key, value);} getData(key) {return this.data.get(key);}},
     ClipboardEvent: class {constructor(type, options) {this.type = type; this.clipboardData = options.clipboardData;}}};
   vm.runInNewContext(readFileSync(path.join(__dirname, '../src/edge-extension/content.js'), 'utf8'), context);
@@ -164,6 +164,14 @@ test('A hidden Teams tab continues observing and confirming replies with the sam
   assert.equal(f.state.calls.some(call => call.route === 'observe'), true);
   assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
 });
+test('Successful background polls continue without waiting for the page interval', async () => {
+  const f = await run({visibility: 'hidden'});
+  assert.equal(f.state.calls.find(call => call.route === 'next').body.wait, 10);
+  assert.equal(typeof f.state.continuePoll, 'function');
+  const before = f.state.calls.filter(call => call.route === 'observe').length;
+  await f.state.continuePoll();
+  assert.equal(f.state.calls.filter(call => call.route === 'observe').length, before + 1);
+});
 test('Model paste pipeline handles multiline content without DOM-only insertion', async () => {
   const f = await run({input: 'cancel'});
   assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
@@ -199,7 +207,7 @@ test('Ordinary personal text is removed from observations', async () => {
   let interval;
   const context = {WorkLinkDOM: dom, document: f.document, chrome: f.chrome,
     window: {getSelection: () => ({removeAllRanges() {}, addRange() {}})},
-    setInterval(fn) {interval = fn;}, setTimeout, Date};
+    setInterval(fn) {interval = fn;}, queueMicrotask() {}, setTimeout, Date};
   vm.runInNewContext(readFileSync(path.join(__dirname, '../src/edge-extension/content.js'), 'utf8'), context);
   for (let i = 0; i < 100 && !f.state.finished; i++) await new Promise(resolve => setTimeout(resolve, 10));
   const observation = f.state.calls.find(call => call.route === 'observe');

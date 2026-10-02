@@ -100,6 +100,7 @@ class Bridge:
         self.operation_timeout = operation_timeout
         self.adapter_owner = None
         self.adapter_last_seen = 0.0
+        self.adapter_poll_wait = 0
         # Effects leased to a browser before a restart may have committed: never replay them.
         with self.db:
             self.db.execute("UPDATE jobs SET state='unknown' WHERE state='leased'")
@@ -376,10 +377,19 @@ class Bridge:
             raise ApiError(409, 'A different Teams adapter is active')
         self.adapter_owner, self.adapter_last_seen = client_id, time.monotonic()
 
-    def lease(self, client_id):
+    def lease(self, client_id, wait=0):
+        wait = integer(wait, 'wait', 0, 10)
         with self.transaction():
             self.adapter(client_id)
-            row = self.db.execute("SELECT * FROM jobs WHERE state='pending' ORDER BY created LIMIT 1").fetchone()
+            self.adapter_poll_wait = wait
+            deadline = time.monotonic() + wait
+            while True:
+                row = self.db.execute("SELECT * FROM jobs WHERE state='pending' ORDER BY created LIMIT 1").fetchone()
+                if row or time.monotonic() >= deadline:
+                    break
+                self.cv.wait(min(1, deadline - time.monotonic()))
+                # Maintain ownership only while this authenticated poll is alive.
+                self.adapter(client_id)
             if not row:
                 return None
             nonce = secrets.token_hex(16)

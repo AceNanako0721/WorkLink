@@ -62,6 +62,27 @@ class BridgeTests(unittest.TestCase):
         self.bridge.ingest([{'id': str(int(time.time()*1000)-1000), 'text': '/chat old loaded later'}])
         self.assertEqual(self.bridge.get_updates({}), [])
 
+    def test_adapter_long_poll_wakes_for_reply_and_has_bounded_wait(self):
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            waiting = pool.submit(self.bridge.lease, 'synthetic_adapter', 1)
+            with self.assertRaises(concurrent.futures.TimeoutError):
+                waiting.result(timeout=.03)
+            job_id = self.bridge.enqueue_effect('sendmessage', {'chat_id': 1001, 'text': 'Wake browser'})
+            job = waiting.result(timeout=.5)
+            self.assertEqual(job['id'], job_id)
+            self.assertEqual(job['text'], 'omp：Wake browser')
+        started = time.monotonic()
+        self.assertIsNone(self.bridge.lease('synthetic_adapter', 1))
+        self.assertLess(time.monotonic() - started, 1.5)
+        with self.assertRaises(ApiError):
+            self.bridge.lease('synthetic_adapter', 11)
+
+    def test_open_menu_does_not_block_new_commands(self):
+        self.finish('sendmessage', {'text': 'Menu', 'reply_markup': {'inline_keyboard': [[{'text': 'Option', 'callback_data': 'fixture:option'}]]}})
+        self.observe('/chat /model')
+        self.observe('/chat /help')
+        self.assertEqual([u['message']['text'] for u in self.bridge.get_updates({})], ['/model', '/help'])
+
     def test_keyboard_callback_then_edit_invalidates_old_choice(self):
         markup = {'inline_keyboard': [[{'text': 'Accept', 'callback_data': 'approve:test'}, {'text': 'Reject', 'callback_data': 'reject:test'}]]}
         result, job = self.finish('sendmessage', {'text': 'Select', 'reply_markup': markup})
@@ -209,7 +230,7 @@ class HttpTests(unittest.TestCase):
             deadline = time.monotonic()+2
             job = None
             while not job and time.monotonic()<deadline:
-                job = self.request('/adapter/next', common, **auth)[1]['result']
+                job = self.request('/adapter/next', {**common, 'wait': 1}, **auth)[1]['result']
                 if not job:
                     time.sleep(.01)
             self.assertIsNotNone(job)
@@ -219,6 +240,7 @@ class HttpTests(unittest.TestCase):
             status, result = sending.result(timeout=2)
             self.assertEqual(status, 200)
             self.assertEqual(result['result']['text'], 'HTTP fixture')
+            self.assertTrue(self.request('/adapter/status', {}, **auth)[1]['result']['longPolling'])
 
     def test_status_reports_unleased_timeout_without_exposing_payload(self):
         with self.server.bridge.transaction():

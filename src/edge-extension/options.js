@@ -15,6 +15,9 @@ document.getElementById("check").addEventListener("click", async () => {
     const data = await response.json();
     if (!data.ok) throw new Error();
     status.textContent = (data.result.adapterOnline ? "自聊已连接。" : "服务可连接，自聊适配尚未上线。") + " 未完成操作：" + data.result.unfinished.length;
+    if (data.result.adapterOnline && data.result.longPolling === false) {
+      status.textContent += " 当前页面需要重新加载扩展并刷新自聊页，以启用持续连接。";
+    }
   } catch { status.textContent = "连接失败，请检查服务地址、密钥和本地服务。"; }
 });
 document.getElementById("clear").addEventListener("click", async () => {
