@@ -87,6 +87,21 @@ class BridgeTests(unittest.TestCase):
         self.bridge.ingest([{'id': row['teams_id'], 'text': job['text']}])
         self.assertEqual(self.bridge.get_updates({}), [])
 
+    def test_concurrent_final_reply_and_activity_report_are_serialized(self):
+        first = self.bridge.enqueue_effect('sendmessage', {'chat_id': 1001, 'text': 'Synthetic final answer'})
+        lease = self.bridge.lease('synthetic_adapter')
+        with concurrent.futures.ThreadPoolExecutor() as pool:
+            second = pool.submit(self.bridge.enqueue_effect, 'sendmessage', {'chat_id': 1001, 'text': 'Synthetic activity report'})
+            time.sleep(.02)
+            self.assertFalse(second.done())
+            self.bridge.complete('synthetic_adapter', first, lease['lease'], 'succeeded', str(self.clock+1))
+            second_id = second.result(timeout=1)
+        second_lease = self.bridge.lease('synthetic_adapter')
+        self.assertEqual(second_lease['id'], second_id)
+        self.assertEqual(second_lease['plain_text'], 'Synthetic activity report')
+        self.bridge.complete('synthetic_adapter', second_id, second_lease['lease'], 'succeeded', str(self.clock+2))
+        self.assertNotEqual(self.bridge.wait_effect(first)['message_id'], self.bridge.wait_effect(second_id)['message_id'])
+
     def test_user_messages_cannot_be_edited_by_bot(self):
         self.observe('/chat question')
         mid = self.bridge.get_updates({})[0]['message']['message_id']

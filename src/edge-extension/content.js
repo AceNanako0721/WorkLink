@@ -3,7 +3,7 @@
   const dom = WorkLinkDOM;
   // Teams can expand blank paragraphs on paste. Only reply comparisons accept
   // this rendering difference; command observations and personal drafts stay exact.
-  const replyText = text => dom.normalize(text).replace(/^[^\S\n]+$/gm, "").replace(/\n{3,}/g, "\n\n");
+  const replyText = text => dom.normalize(text).replace(/\u00a0/g, " ").replace(/^[^\S\n]+$/gm, "").replace(/\n{3,}/g, "\n\n");
   let busy = false, settings = null, observed = false;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const transport = message => chrome.runtime.sendMessage(message);
@@ -180,7 +180,7 @@
     }
   }
   async function tick() {
-    if (busy || document.visibilityState !== "visible") return;
+    if (busy) return;
     busy = true;
     try {
       settings ||= await request("settings");

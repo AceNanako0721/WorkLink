@@ -30,7 +30,8 @@ def main():
     started = time.time()
     stamp = time.strftime('%Y%m%d-%H%M%S') + '-' + str(os.getpid())
     child = subprocess.Popen(
-        [args.omp, '--mode', 'rpc', '--no-ui', '--no-title', '--cwd', str(workspace)],
+        [args.omp, '--mode', 'rpc', '--no-ui', '--no-title', '--cwd', str(workspace),
+         '--extension', str(checkout/'src/omp-extension/activity.mjs')],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding='utf-8', errors='replace', bufsize=1)
 

@@ -19,3 +19,4 @@ jobs:
         with:
           node-version: '22'
       - run: node --test tests/edge-extension.test.cjs
+      - run: node --test tests/omp-activity.test.cjs

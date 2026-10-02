@@ -307,8 +307,19 @@ class Bridge:
         with self.transaction():
             if not self.adapter_owner or time.monotonic() - self.adapter_last_seen > 15:
                 raise ApiError(503, 'Teams adapter is offline')
-            if self.db.execute("SELECT 1 FROM jobs WHERE state IN ('pending','leased','unknown')").fetchone():
-                raise ApiError(409, 'An operation is unfinished; reconcile it before submitting another')
+            # A normal final reply and its activity report can arrive together.
+            # Wait for confirmed healthy effects instead of rejecting one reply.
+            # Unknown effects still fence all new work, without any replay.
+            deadline = time.monotonic() + self.operation_timeout
+            while self.db.execute("SELECT 1 FROM jobs WHERE state IN ('pending','leased','unknown')").fetchone():
+                if self.db.execute("SELECT 1 FROM jobs WHERE state='unknown'").fetchone():
+                    raise ApiError(409, 'An operation is unfinished; reconcile it before submitting another')
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ApiError(503, 'Reply channel is busy; no new operation was submitted')
+                self.cv.wait(min(1, remaining))
+            if time.monotonic() - self.adapter_last_seen > 15:
+                raise ApiError(503, 'Teams adapter is offline')
             if method in {'sendmessage', 'sendrichmessage'}:
                 text = plain_text(body)
                 if not text.strip():

@@ -17,20 +17,25 @@ if ($LASTEXITCODE -ne 0) { throw 'Pinned plugin verification failed.' }
 $taskPreviousBase = $env:WORKLINK_TELEGRAM_API_BASE
 $taskPreviousAgent = $env:PI_CODING_AGENT_DIR
 $taskPreviousFamily = $env:PI_TELEGRAM_NETWORK_FAMILY
+$taskPreviousPluginDir = $env:WORKLINK_TELEGRAM_PLUGIN_DIR
 try {
     $env:WORKLINK_TELEGRAM_API_BASE = 'http://127.0.0.1:' + $taskSettings.service.port
     $env:PI_CODING_AGENT_DIR = $taskAgentDir
     $env:PI_TELEGRAM_NETWORK_FAMILY = 'ipv4'
+    $env:WORKLINK_TELEGRAM_PLUGIN_DIR = (Resolve-Path -LiteralPath $PluginPath).Path
+    $taskActivityPath = Join-Path $taskAgentDir 'worklink-activity.json'
+    if (-not (Test-Path -LiteralPath $taskActivityPath)) { '{"showReasoning":false,"showToolProgress":true}' | Set-Content -LiteralPath $taskActivityPath -Encoding utf8 }
     Write-Host 'OMP will use the local WorkLink endpoint and the dedicated external profile.'
     if ($Headless) {
         python -X utf8 (Join-Path $PSScriptRoot 'run-omp.py') --omp (Get-Command omp).Source --agent-dir $taskAgentDir --workspace $Workspace
     } else {
         Write-Host 'Use /telegram-connect in OMP after its model credentials and plugin are ready.'
-        & omp --cwd $Workspace
+        & omp --cwd $Workspace --extension (Join-Path $taskRoot 'src/omp-extension/activity.mjs')
     }
     if ($LASTEXITCODE -ne 0) { throw 'OMP stopped with an error.' }
 } finally {
     $env:WORKLINK_TELEGRAM_API_BASE = $taskPreviousBase
     $env:PI_CODING_AGENT_DIR = $taskPreviousAgent
     $env:PI_TELEGRAM_NETWORK_FAMILY = $taskPreviousFamily
+    $env:WORKLINK_TELEGRAM_PLUGIN_DIR = $taskPreviousPluginDir
 }
