@@ -117,7 +117,7 @@ def create_server(config_path, *, port_override=None):
                             result = {'adapterOnline': bridge.adapter_owner is not None and time.monotonic() - bridge.adapter_last_seen <= 15,
                                       'unfinished': [dict(row) for row in bridge.db.execute("SELECT id,kind,state FROM jobs WHERE state IN ('pending','leased','unknown')")],
                                       'recentFailures': [{'kind': row['kind'], 'state': row['state'], 'code': (json.loads(row['result']) or {}).get('failure_code')}
-                                                         for row in bridge.db.execute("SELECT kind,state,result FROM jobs WHERE state IN ('failed','unknown') ORDER BY created DESC LIMIT 5")]}
+                                                         for row in bridge.db.execute("SELECT kind,state,COALESCE(result, 'null') AS result FROM jobs WHERE state IN ('failed','unknown') ORDER BY created DESC LIMIT 5")]}
                     else:
                         if data.get('chatTitle') != expected_title:
                             raise ApiError(403, 'Self-chat identity mismatch')

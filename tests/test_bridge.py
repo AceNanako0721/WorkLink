@@ -219,3 +219,13 @@ class HttpTests(unittest.TestCase):
             status, result = sending.result(timeout=2)
             self.assertEqual(status, 200)
             self.assertEqual(result['result']['text'], 'HTTP fixture')
+
+    def test_status_reports_unleased_timeout_without_exposing_payload(self):
+        with self.server.bridge.transaction():
+            self.server.bridge.db.execute(
+                "INSERT INTO jobs VALUES ('synthetic_timeout','send',?, 'failed',NULL,NULL,?)",
+                (json.dumps({'text': 'Synthetic private draft'}), time.time()))
+        status, result = self.request('/adapter/status', {}, Authorization='Bearer '+self.adapter)
+        self.assertEqual(status, 200)
+        self.assertEqual(result['result']['recentFailures'], [{'kind': 'send', 'state': 'failed', 'code': None}])
+        self.assertNotIn('Synthetic private draft', json.dumps(result))

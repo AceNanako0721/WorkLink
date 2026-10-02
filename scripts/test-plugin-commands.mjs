@@ -20,3 +20,18 @@ for (const text of ['/model', '/fixture keep args', '/review', '/not_exposed', '
 }
 assert.deepEqual(events, ['model-control', 'keep args', 'prompt:Review fixture', 'unsupported:not_exposed', 'prompt:Hello']);
 console.log('Pinned plugin command/control/template dispatch and unknown-command rejection passed.');
+const status = await import(pathToFileURL(resolve(plugin, 'lib/status.ts')));
+const minimal = status.buildStatusHtml({}, {provider: 'fixture', id: 'synthetic-model'});
+assert.match(minimal, /unknown/);
+assert.doesNotMatch(minimal, /Usage|Cost/);
+const complete = status.buildStatusHtml({
+  sessionManager: {getEntries: () => [{type: 'message', message: {role: 'assistant', usage: {input: 120, output: 30, cacheRead: 0, cacheWrite: 0, cost: {total: 0.01}}}}]},
+  getContextUsage: () => ({percent: 10, contextWindow: 1000}),
+  modelRegistry: {isUsingOAuth: () => true}, isIdle: () => true
+}, {provider: 'fixture', id: 'synthetic-model'});
+assert.match(complete, /Usage/);
+assert.match(complete, /120/);
+assert.match(complete, /idle/);
+assert.match(complete, /\(sub\)/);
+assert.match(complete, /10\.0%/);
+console.log('Pinned plugin status works with missing optional OMP statistics and retains supplied statistics.');
