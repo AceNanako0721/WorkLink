@@ -29,7 +29,7 @@ python -X utf8 scripts/setup-local.py
 
 在 Edge 中加载 `src/edge-extension`，在扩展设置里填写 `http://127.0.0.1:8765` 和外部 `secrets/adapter-token.txt` 的密钥，刷新 Teams 自聊页并保持可见、停留在最新消息。OMP 插件接入、恢复处理及验证记录见 [第一版运行说明](doc/第一版运行说明.md)。
 
-服务与扩展已通过模拟测试，并在真实 Teams 确认自动输入读取、回复发送、选项回调、编辑与删除。固定 Telegram 插件已装入真实 OMP，Teams `/chat` 已触发实际模型调用并收到 `omp：` 回复。可用 `scripts/start-omp.ps1 -Headless` 自动连接并保持会话；模型授权与配置保存在仓库外。多段帮助菜单的最新兼容修正仍待真实复验。
+服务与扩展已通过模拟测试，并在真实 Teams 确认自动输入读取、回复发送、选项回调、编辑与删除。固定 Telegram 插件已装入真实 OMP，Teams `/chat` 已触发实际模型调用并收到 `omp：` 回复。可用 `scripts/start-omp.ps1 -Headless` 自动连接并保持会话；模型授权与配置保存在仓库外。多段帮助菜单、真实选项回调和原消息菜单编辑也已实测通过。
 
 本版仅支持单个自聊、单个 OMP 消费者；用户输入的修改/删除不自动重提或取消任务。附件、语音、Web App、群聊、跨主机部署及 SharePoint 自动传输未集成。不支持的方法返回明确错误。
 
