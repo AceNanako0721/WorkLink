@@ -1,6 +1,9 @@
 /* Serialize effects; preserve drafts and stop on identity changes or uncertain results. */
 (() => {
   const dom = WorkLinkDOM;
+  // Teams can expand blank paragraphs on paste. Only reply comparisons accept
+  // this rendering difference; command observations and personal drafts stay exact.
+  const replyText = text => dom.normalize(text).replace(/\n{3,}/g, "\n\n");
   let busy = false, settings = null, observed = false;
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const transport = message => chrome.runtime.sendMessage(message);
@@ -56,17 +59,17 @@
     const transfer = new DataTransfer();
     transfer.setData("text/plain", text);
     editor.dispatchEvent(new ClipboardEvent("paste", {bubbles: true, cancelable: true, clipboardData: transfer}));
-    await waitFor(() => dom.normalize(editor.innerText) === dom.normalize(text), 1500);
+    await waitFor(() => replyText(editor.innerText) === replyText(text), 1500);
   }
 
   async function reconcile(saved) {
     const rows = dom.messages(document);
     if (saved.job.kind === "send") {
-      const matches = rows.filter(row => !saved.beforeIds.includes(row.id) && row.text === dom.normalize(saved.job.text) && row.sent);
+      const matches = rows.filter(row => !saved.beforeIds.includes(row.id) && replyText(row.text) === replyText(saved.job.text) && row.sent);
       return matches.length === 1 ? matches[0].id : null;
     }
     const row = rows.find(item => item.id === saved.job.teams_id);
-    if (saved.job.kind === "edit" && row?.text === dom.normalize(saved.job.text)) return row.id;
+    if (saved.job.kind === "edit" && row && replyText(row.text) === replyText(saved.job.text)) return row.id;
     if (saved.job.kind === "delete" && row?.deleted) return row.id;
     return null;
   }
@@ -98,7 +101,7 @@
         send.click();
       } else {
         const row = [...document.querySelectorAll(dom.selectors.messages)].find(e => e.getAttribute("data-mid") === job.teams_id);
-        if (!row || dom.normalize(row.querySelector(dom.selectors.text)?.innerText || "") !== dom.normalize(job.expected_text)) {
+        if (!row || replyText(row.querySelector(dom.selectors.text)?.innerText || "") !== replyText(job.expected_text)) {
           throw new Error("Reply not visible or was modified externally");
         }
         const menu = row.querySelector(dom.selectors.menu);
@@ -131,7 +134,7 @@
           edit.click();
           // Teams renders its inline edit composer outside the message body.
           const editor = await waitFor(() => {
-            const editors = [...document.querySelectorAll(dom.selectors.composer)].filter(e => dom.normalize(e.innerText) === dom.normalize(job.expected_text));
+            const editors = [...document.querySelectorAll(dom.selectors.composer)].filter(e => replyText(e.innerText) === replyText(job.expected_text));
             return editors.length === 1 ? editors[0] : null;
           }, 3000);
           await fill(editor, job.text);
@@ -155,11 +158,11 @@
         // This function only reads DOM; promise reconciliation is handled below.
         const rows = dom.messages(document);
         if (job.kind === "send") {
-          const matches = rows.filter(r => !saved.beforeIds.includes(r.id) && r.text === dom.normalize(job.text) && r.sent);
+          const matches = rows.filter(r => !saved.beforeIds.includes(r.id) && replyText(r.text) === replyText(job.text) && r.sent);
           return matches.length === 1 ? matches[0].id : null;
         }
         const row = rows.find(r => r.id === job.teams_id);
-        return job.kind === "edit" && row?.text === dom.normalize(job.text) || job.kind === "delete" && row?.deleted ? job.teams_id : null;
+        return job.kind === "edit" && row && replyText(row.text) === replyText(job.text) || job.kind === "delete" && row?.deleted ? job.teams_id : null;
       });
       await complete(saved, "succeeded", teamsId);
     } catch (error) {

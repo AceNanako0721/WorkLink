@@ -12,11 +12,12 @@ function fixture({title='Synthetic Owner (you)', participants=1, draft='', kind=
   function editor(text) { return {innerText: text, focus() {state.focus = this; if (input === "user-edit") setTimeout(() => {this.innerText = "New personal draft";}, 10);},
     replaceChildren() {throw new Error('Controlled-editor DOM must not be replaced');},
     dispatchEvent(event) {assert.equal(event.type, 'paste'); state.pasteEvents = (state.pasteEvents || 0) + 1;
-      const text = event.clipboardData.getData('text/plain');
+      const text = input === 'paragraphs' ? event.clipboardData.getData('text/plain').replace(/\n\n/g, '\n\n\n\n') : event.clipboardData.getData('text/plain');
       if (input === 'delayed') setTimeout(() => {this.innerText = text;}, 40);
       else this.innerText = this.innerText && !state.selectionSettled ? text + this.innerText : text;}}; }
   const compose = editor(draft);
   const job = {id: 'synthetic_job', lease: 'synthetic_lease', kind, teams_id: kind === 'send' ? null : '1900000000001', text: 'omp：Fixture reply\nOption: /choose k000000000001 1', expected_text: 'omp：Old reply'};
+  if (input === 'paragraphs') job.text = 'omp：Fixture reply\n\nSecond paragraph';
   function message(id, text, {sent=true, edited=false, deleted=false} = {}) {
     const row = {
       id, innerText: deleted ? '此消息已删除。\n撤消' : text, text: {innerText: text}, sent, edited, deleted,
@@ -141,6 +142,14 @@ test('Message-bound toolbar edits directly and opens overflow for deletion', asy
     assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
     assert.equal(f.state.moreClicks || 0, kind === 'delete' ? 1 : 0);
     assert.equal(f.state.calls.find(call => call.route === 'complete').body.teamsId, f.job.teams_id);
+  }
+});
+
+test('Reply confirmation tolerates Teams expanding blank paragraphs', async () => {
+  for (const kind of ['send', 'edit']) {
+    const f = await run({kind, input: 'paragraphs'});
+    assert.equal(f.state.calls.find(call => call.route === 'complete').body.state, 'succeeded');
+    assert.equal(f.state.rows[0].text.innerText, f.job.text.replace(/\n\n/g, '\n\n\n\n'));
   }
 });
 test('Existing draft survives and no send occurs', async () => {
